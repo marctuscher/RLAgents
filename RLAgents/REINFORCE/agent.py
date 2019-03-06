@@ -1,3 +1,4 @@
+import roboschool
 import gym
 from tqdm import tqdm
 from RLAgents.REINFORCE.policy import Policy
@@ -24,6 +25,8 @@ class ReinforceAgent():
             done = False
             for j in range(self.max_ep_steps):
                 action = self.policy.action(np.array([ob]))
+                
+                # self.env.env_step() for roboschool envs
                 ob, reward, done, _ = self.env.step(action)
                 r += reward
                 rewards.append(reward)

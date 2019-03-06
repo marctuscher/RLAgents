@@ -51,10 +51,10 @@ class Policy(nn.Module):
         # always normalize before feeding something into network
         G = (G - G.mean()) / (G.std()+ 1e-6)
         loss = []
-        for log_prob, R in zip(self.log_probs, G):
-            loss.append(-log_prob * R)
+        self.log_probs = torch.cat(self.log_probs)
+        loss = -self.log_probs * G
         self.optimizer.zero_grad()
-        loss = torch.cat(loss).sum()
+        loss = loss.sum()
         loss.backward()
         self.optimizer.step()
         self.log_probs = []
