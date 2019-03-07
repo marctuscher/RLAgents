@@ -13,14 +13,12 @@ class SingleHiddenActorNetwork(nn.Module):
         self.fc1 = nn.Linear(*input_shape, hidden_size)
         self.dropout = nn.Dropout(0.5)
         self.relu = nn.ReLU()
-        self.batchnorm = nn.BatchNorm1d(hidden_size)
         self.fc2 = nn.Linear(hidden_size, action_size)
     
     def forward(self, x):
         out = self.fc1(x)
         out = self.dropout(out)
         out = self.relu(out)
-        out = self.batchnorm(out)
         out = self.fc2(out)
         return F.softmax(out, dim=1)
 
@@ -40,6 +38,7 @@ class CriticNetwork(nn.Module):
         out = self.fc2(out)
         return out
 
+
 class Policy():
 
     def __init__(self, env, hidden_size, lr):
@@ -48,42 +47,49 @@ class Policy():
         obs_shape = get_space_shape(self.env.observation_space)
         action_shape = get_space_shape(self.env.action_space)
 
-        self.actor = SingleHiddenActorNetwork(256, obs_shape, action_shape).to("cuda:0")
-        self.critic = CriticNetwork(256, obs_shape).to("cuda:0")
-        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=5e-4)
-        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=1e-3)
+        self.actor = SingleHiddenActorNetwork(128, obs_shape, action_shape).to("cuda:0")
+        self.critic = CriticNetwork(128, obs_shape).to("cuda:0")
 
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
+
+        self.log_probs = []
+        self.values = []
+        self.actions = []
+        self.entropies = []
 
 
     def action(self, ob):
         self.actor.eval()
         self.critic.eval()
         ob = torch.from_numpy(ob).float().to('cuda:0')
-        prob_actor = self.actor(ob)
-        prob, sample = prob_actor.max(dim=1)
+        out = self.actor(ob)
         value = self.critic(ob)
-        log = torch.log(prob)
-        entropy = -prob * log
+        dist = Categorical(out)
+        action = dist.sample()
+
         # take also the log probability of this action for computing the loss
         # later on without having to run forward again.
-        return sample.item(), log, value, entropy
+        self.entropies.append(dist.entropy().item())
+        self.log_probs.append(dist.log_prob(action))
+        self.actions.append(action)
+        self.values.append(value)
+
+        return action.item()
 
 
-    def train_policy(self, rewards, states, values, log_probs, entropies,gamma, bootstrap):
+    def train_policy(self, rewards, states, gamma, bootstrap):
         self.actor.train()
         self.critic.train()
         # discount returns
-        values = torch.cat(values)
-        entropies = torch.cat(entropies)
-        advs, rtg = discount_td(np.array(rewards), values.data.cpu().squeeze().numpy(), bootstrap, gamma, 0.99)
+        self.values = torch.cat(self.values)
+        advs, rtg = discount_td(np.array(rewards), self.values.data.cpu().squeeze().numpy(), bootstrap, gamma, 0.8)
         advs = torch.cuda.FloatTensor(advs)
         rtg = torch.cuda.FloatTensor(rtg)
 
-        advs = (advs - advs.mean()) / advs.std()
+        critic_loss = nn.functional.smooth_l1_loss(self.values, rtg)
 
-        critic_loss = nn.functional.smooth_l1_loss(values, rtg)
-
-        actor_loss = torch.cat(log_probs)  * advs + entropies
+        actor_loss = torch.cat(self.log_probs) * advs
 
         self.actor_optimizer.zero_grad()
         actor_loss = -actor_loss.mean()

@@ -1,13 +1,13 @@
 import roboschool
 import gym
 from tqdm import tqdm
-from RLAgents.VanillaPG.policy import Policy
+from RLAgents.PPO.policy import Policy
 import numpy as np
 from tensorboardX import SummaryWriter
 from RLAgents.utils import get_cool_looking_datestring
 import torch
 
-class VanillaPGAgent():
+class PPOAgent():
 
     def __init__(self, env_name, gamma, max_ep_steps, train_steps):
         self.env = gym.make(env_name)
@@ -24,32 +24,29 @@ class VanillaPGAgent():
             states = []
             values = []
             log_probs = []
-            entropies = []
             r = 0
             ob = self.env.reset()
             done = False
             for j in range(self.max_ep_steps):
-                action, log_prob, value, ent = self.policy.action(np.array([ob]))
+                action, log_prob, value = self.policy.action(np.array([ob]))
                 states.append(ob)
                 values.append(value)
                 log_probs.append(log_prob)
-                entropies.append(ent)
                 # self.env.env_step() for roboschool envs
                 ob_, reward, done, _ = self.env.step(action)
                 r += reward
                 rewards.append(reward)
                 if done:
-                    value_loss, policy_loss = self.policy.train_policy(rewards, states, values, log_probs, entropies,self.gamma, 0)
+                    value_loss, policy_loss = self.policy.train_policy(rewards, states,self.gamma, 0)
                     self.writer.add_scalar(self.env_name+'/VanillaPG_valueLoss', value_loss , i)
                     self.writer.add_scalar(self.env_name+'/VanillaPG_policyLoss', policy_loss , i)
                     self.writer.add_scalar(self.env_name+'/VanillaPG_reward', r, i)
                     break
                 if j == self.train_steps:
-                    value_loss, policy_loss = self.policy.train_policy(rewards, states, values, log_probs, entropies,self.gamma, self.policy.critic(torch.from_numpy(ob_).float().to('cuda:0')).item())
+                    value_loss, policy_loss = self.policy.train_policy(rewards, states, values, log_probs, self.gamma, self.policy.critic(torch.from_numpy(ob_).float().to('cuda:0')).item())
                     rewards = []
-                    states = []
                     values = []
                     log_probs = []
-                    entropies = []
+                    states = []
                 ob = ob_
         self.writer.close()
