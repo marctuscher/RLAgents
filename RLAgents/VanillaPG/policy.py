@@ -12,8 +12,9 @@ class SingleHiddenActorNetwork(nn.Module):
         super (SingleHiddenActorNetwork, self).__init__()
         self.fc1 = nn.Linear(*input_shape, hidden_size)
         self.dropout = nn.Dropout(0.5)
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU6()
         self.batchnorm = nn.BatchNorm1d(hidden_size)
+        self.batchnorm2 = nn.BatchNorm1d(action_size)
         self.fc2 = nn.Linear(hidden_size, action_size)
     
     def forward(self, x):
@@ -22,6 +23,7 @@ class SingleHiddenActorNetwork(nn.Module):
         out = self.relu(out)
         out = self.batchnorm(out)
         out = self.fc2(out)
+        out = self.batchnorm2(out)
         return F.softmax(out, dim=1)
 
 
@@ -59,7 +61,7 @@ class Policy():
         self.actor.eval()
         self.critic.eval()
         ob = torch.from_numpy(ob).float().to('cuda:0')
-        prob_actor = self.actor(ob)
+        prob_actor = self.actor(ob).clamp(0,1)
         prob, sample = prob_actor.max(dim=1)
         value = self.critic(ob)
         log = torch.log(prob)
@@ -79,11 +81,11 @@ class Policy():
         advs = torch.cuda.FloatTensor(advs)
         rtg = torch.cuda.FloatTensor(rtg)
 
-        advs = (advs - advs.mean()) / advs.std()
+        advs = (advs - advs.mean()) / advs.std() + np.finfo(np.float32).eps
 
-        critic_loss = nn.functional.smooth_l1_loss(values, rtg)
+        critic_loss = nn.functional.mse_loss(values, rtg)
 
-        actor_loss = torch.cat(log_probs)  * advs + entropies
+        actor_loss = torch.cat(log_probs)  * advs + 0.1 * entropies
 
         self.actor_optimizer.zero_grad()
         actor_loss = -actor_loss.mean()
